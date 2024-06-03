@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
@@ -14,18 +15,33 @@ class RecomendModel():
         self.websocket = websocket
         # папка, относительно которой искать папку photos для сохранения картинки
         script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        self.merged_data_fname = f"{script_dir}/fast_api/inputdataset/{merged_data_fname}"
+        # self.merged_data_fname = f"{script_dir}/fast_api/inputdataset/{merged_data_fname}"
+        self.merged_data_fname = f"../inputdataset/{merged_data_fname}"
         self.initialized = False        
     async def initialize(self):
         if self.websocket:
-            await self.websocket.send_text(f"Загрузка датасета {self.merged_data_fname} ~1мин 25сек....")
+            await self.websocket.send_text(f"{os.path.abspath(self.merged_data_fname)}")
         else:
-            print("Starting initialization...")
+            print("websocket fail, Starting initialization...")
 
         # предподготовленный датасет с учетом очистки,генерации факторов и т.д.
         # merged_data=pd.read_csv(f"{script_dir}/../inputdataset/{merged_data}")
         print(f"Загрузка датасета {self.merged_data_fname} ~1мин 25сек....")
-        # await asyncio.sleep(2)
+        # await asyncio.sleep(5)
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            if self.websocket:
+                await self.websocket.send_text(f"Загрузка датасета {self.merged_data_fname} ~1мин 25сек.")
+            await loop.run_in_executor(pool, self.load_)
+            if self.websocket:
+                await self.websocket.send_text("Обучение модели ~40сек....")
+            await loop.run_in_executor(pool, self.train_)
+        
+        self.initialized = True
+        if self.websocket:
+            await self.websocket.send_text("finish")
+
+    def load_(self):
         merged_data=pd.read_csv(f"{self.merged_data_fname}")
 
         # создаем новый столбец 'purchased_binary', который будет равен 1, если событие было 'transaction', и 0 в противном случае
@@ -49,17 +65,12 @@ class RecomendModel():
         self.train_date_range = (train_dates.min(), train_dates.max())
         self.test_date_range = (test_dates.min(), test_dates.max())
 
+    def train_(self):
         print(f"Обучение модели ~40сек....")
-        if self.websocket:
-            await self.websocket.send_text("Обучение модели ~40сек....")
         self.xgb_clf = xgb.XGBClassifier()
         self.xgb_clf.fit(self.X_train, self.y_train)
         print(f"Модель готова к работе.")
         self.initialized = True
-        if self.websocket:
-            await self.websocket.send_text("finish")
-        return        
-
 
     def precision_at_k(self,y_true, y_pred_proba, k=3):
         sorted_items = np.argsort(-y_pred_proba)
@@ -86,23 +97,22 @@ class RecomendModel():
             
             # Используем эти индексы для получения itemid из saved_item_ids
             recommended_items = saved_item_ids.loc[top3_indices]['itemid'].values
-            return recommended_items
+            return True,recommended_items
         # если клиент не проявлял активности в просмотрах, то предложить самые популярные товары
         else:
-            return saved_item_ids['itemid'].value_counts().head(3).index.tolist()
-    def gettop3(self,visitorid_= "1404265"):
+            return False,saved_item_ids['itemid'].value_counts().head(3).index.tolist()
+    def apigettop3(self,visitorid_= "1404265"):
         try:
             visitorid = int(visitorid_)
         except ValueError as e:
             print(f"Error converting visitorid to int: {e}")
-            return "идентификатор клиента должен быть целым числом"
+            return -1,False,"идентификатор клиента должен быть целым числом"
         # передать только обучающий фрагмент базы (первые 80%, на которых обучалась модель)
         # чтобы проверить, как работают предсказания для покупателей на последних 20%
         # Получение индексов, соответствующих условию пограничной даты деления 80%/20%
         filtered_indices = self.item_ids[self.item_ids['datetime'] >= self.test_date_range[0]].index
         # Применение фильтра к purchased_final на основе индексов
         filtered_purchased_final = self.purchased_final.loc[filtered_indices]
-
-        top3_recommendations = self.get_top3_recommendations(visitorid,
+        isuser,top3_recommendations=self.get_top3_recommendations(visitorid,
                                         filtered_purchased_final, self.item_ids.loc[filtered_indices])
-        return str(top3_recommendations)
+        return 0,isuser,top3_recommendations

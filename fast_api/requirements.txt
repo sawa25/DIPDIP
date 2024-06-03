@@ -1,6 +1,7 @@
 pandas
 numpy
 scikit-learn
+scikit-surprise
 xgboost
 fastapi
 uvicorn

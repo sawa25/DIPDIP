@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script>
+        function startWebSocket() {
+            var socket = new WebSocket("ws://localhost:5000/ws/");
+            socket.onopen = function(e) {
+                console.log("[open] Соединение установлено");
+            };
+    
+            socket.onmessage = function(event) {
+                var msg = event.data;
+                if (msg === "finish") {
+                    location.reload(); // Reload the page once initialization is finished
+                } else if (msg === ".") {
+                    var messagesDiv = document.getElementById("messages");
+                    var lastParagraph = messagesDiv.querySelector("p:last-of-type");
+                    if (lastParagraph) {
+                        lastParagraph.textContent += ".";
+                    } else {
+                        messagesDiv.innerHTML += "<p>.</p>";
+                    }
+                } else {
+                    document.getElementById("messages").innerHTML += `<p>${msg}</p>`;
+                }
+            };
+    
+            socket.onerror = function(error) {
+                alert(`[error] ${error.message}`);
+            };
+            socket.onclose = function(e) {
+                console.log("[close] Соединение закрыто");
+                document.getElementById("messages").innerHTML = "<p>Система загружена и готова к работе!</p>";
+            };
+        }
+    
+        window.addEventListener("beforeunload", function(e) {
+            if (typeof socket !== "undefined" && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+        });
+        </script>
+        <style>
+        #messages p {
+            background-color: lightgray;
+            padding: 10px;
+            margin-bottom: 5px;
+        }
+        </style>
+    
+    <title>Получить предложение по топ 3 товарам для выбранного клиента</title>
+</head>
+<body>
+    {% if ws_needed %}    
+    <a href="#" onclick="startWebSocket(); return false;">Запустить модель</a>
+    <p>Подготовка системы к работе составляет ~2 минуты</p>
+  <div id="messages"></div>
+    {% else %}
+    <h1>Получить предложение по топ 3 товарам для выбранного клиента</h1>
+    <form id="submitForm" method="post" action="/submit/" enabled=false disabled = "true">
+        <label for="input_text">Введите идентификатор клиента:</label>
+        <input type="text" id="input_text" name="input_text">
+        <input type="submit" id="submitButton" value="Submit">
+    </form>
+
+    {% if result %}
+    <h2>Ответ рекомендательной системы</h2>
+    <p>Топ 3 товара: {{ result }}</p>
+    {% endif %}
+    {% endif %}
+</body>
+</html>
